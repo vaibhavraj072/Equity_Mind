@@ -5,13 +5,9 @@
 
 ## 🎥 Project Demo
 
-> Watch the full demo of EquityMind AI below:
+[![Watch the Demo](https://img.youtube.com/vi/oUOFlz9ysYQ/maxresdefault.jpg)](https://youtu.be/oUOFlz9ysYQ)
 
-<video src="src/resources/Final Equity_Mids.mp4" controls width="100%"></video>
-
-If the video does not render on GitHub, you can download it directly from:
-`src/resources/Final Equity_Mids.mp4`
-
+▶ Click the image above to watch the full demo on YouTube.
 ---
 
 ## 🚀 Overview
