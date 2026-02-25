@@ -1,19 +1,10 @@
-import OpenAI from "openai";
 import { v4 as uuidv4 } from "uuid";
 import { InvestmentMemo, UserMemoryProfile, FinancialMetrics } from "@/types";
 import { config } from "@/lib/config";
+import { callWithFallback } from "./llm-client";
 import { getSystemPrompt, getFinancialContextPrompt, getMemoSchema } from "./prompts";
 import { calculateConfidenceScore } from "./confidence-scorer";
 import { getMockCompanyMetrics } from "@/lib/financial-data";
-
-const client = new OpenAI({
-    baseURL: config.openRouter.baseUrl,
-    apiKey: process.env.OPENROUTER_API_KEY || "",
-    defaultHeaders: {
-        "HTTP-Referer": config.openRouter.siteUrl,
-        "X-Title": config.openRouter.siteName,
-    },
-});
 
 function parseMemoJson(raw: string, fallbackTicker: string, query: string): InvestmentMemo {
     const cleaned = raw.replace(/^```(?:json)?\n?/m, "").replace(/\n?```$/m, "").trim();
@@ -88,8 +79,7 @@ Additional Instructions:
 
 ${schema}`;
 
-    const completion = await client.chat.completions.create({
-        model: config.models.deep,
+    const raw = await callWithFallback("deep", {
         messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userMessage },
@@ -97,8 +87,6 @@ ${schema}`;
         temperature: 0.2,
         max_tokens: 6000,
     });
-
-    const raw = completion.choices[0]?.message?.content || "";
     const memo = parseMemoJson(raw, ticker, userQuery);
 
     memo.confidenceScore = calculateConfidenceScore(metrics, memo.discrepancies || [], dataSource);

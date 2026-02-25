@@ -785,7 +785,7 @@ export default function HomePage() {
                                 onMouseEnter={e => (e.currentTarget as HTMLElement).style.opacity = "0.75"}
                                 onMouseLeave={e => (e.currentTarget as HTMLElement).style.opacity = "1"}
                             >
-                                Vaibhav Raj ↗
+                                Tea for Chat ↗
                             </a>
                         </p>
                     </div>

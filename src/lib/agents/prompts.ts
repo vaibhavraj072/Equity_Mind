@@ -1,110 +1,85 @@
 import { UserMemoryProfile, FinancialMetrics, ResearchMode } from "@/types";
 
 export function getSystemPrompt(mode: ResearchMode, profile: UserMemoryProfile): string {
-    const kpiStr = profile.preferredKPIs.join(", ");
-    const sectorsStr = profile.sectorsOfInterest.join(", ");
-    const personalization = `
-User Profile:
-- Risk Tolerance: ${profile.riskTolerance}
-- Preferred KPIs: ${kpiStr}
-- Sectors of Interest: ${sectorsStr}
-- Investment Horizon: ${profile.investmentHorizon}
-- Geographic Focus: ${profile.geographicFocus.join(", ")}
-`.trim();
+  const kpiStr = profile.preferredKPIs.join(", ");
+  const sectorsStr = profile.sectorsOfInterest.join(", ");
 
-    if (mode === "quick") {
-        return `You are EquityMind AI, a senior equity research analyst. Your task is to produce a QUICK MODE analysis — a rapid, structured financial snapshot.
+  const personalization = [
+    `Risk Tolerance: ${profile.riskTolerance}`,
+    `Preferred KPIs: ${kpiStr}`,
+    `Sectors: ${sectorsStr}`,
+    `Horizon: ${profile.investmentHorizon}`,
+    `Geography: ${profile.geographicFocus.join(", ")}`,
+  ].join(" | ");
 
-${personalization}
+  if (mode === "quick") {
+    // ── Compact system prompt: ~60 tokens (was ~200) ─────────────────────
+    return (
+      "You are EquityMind AI, a senior equity analyst. " +
+      "Produce a QUICK MODE JSON analysis of a stock. " +
+      `Focus KPIs: ${kpiStr}. ${personalization}. ` +
+      "Rules: cite specific numbers, be concise, return ONLY valid JSON — no markdown fences."
+    );
+  }
 
-QUICK MODE RULES:
-1. Prioritize the user's preferred KPIs: ${kpiStr}
-2. Be concise but precise — no filler text
-3. Lead with numbers and specific evidence
-4. Flag any obvious red flags or standout positives
-5. End with a 1-sentence investment takeaway
-
-Structure your response as a valid JSON object matching the InvestmentMemo schema exactly.
-Motto: Explain. Compare. Justify.`;
-    }
-
-    return `You are EquityMind AI, a senior equity research analyst with 20+ years at a top-tier investment bank.
-
-${personalization}
-
-DEEP MODE RULES:
-1. Perform comprehensive fundamental analysis
-2. Build a rigorous bull thesis AND bear thesis with supporting evidence
-3. Compare against 2-3 industry peers using specific metrics
-4. Run scenario analysis (bull/base/bear) with explicit assumptions
-5. Detect and flag contradictions between management commentary and reported results
-6. Highlight risks the user's risk tolerance profile should be most concerned about
-7. Every major conclusion must cite specific numbers
-8. Assign a confidence score based on data completeness and source reliability
-
-Structure your response as a valid JSON object matching the InvestmentMemo schema exactly.
-Philosophy: Explain every assumption. Compare to peers. Justify every conclusion.`;
+  // Deep Mode — detailed, full context
+  return (
+    "You are EquityMind AI, a senior equity research analyst with 20+ years experience.\n\n" +
+    `User Profile: ${personalization}\n\n` +
+    "DEEP MODE RULES:\n" +
+    "1. Comprehensive fundamental analysis\n" +
+    "2. Rigorous bull AND bear thesis with evidence\n" +
+    "3. Compare against 2-3 industry peers with specific metrics\n" +
+    "4. Scenario analysis (bull/base/bear) with explicit assumptions\n" +
+    "5. Flag contradictions between management commentary and results\n" +
+    "6. Every conclusion must cite specific numbers\n" +
+    "7. Assign confidence score based on data completeness\n\n" +
+    "Structure as valid JSON matching InvestmentMemo schema exactly. " +
+    "Philosophy: Explain every assumption. Compare to peers. Justify every conclusion."
+  );
 }
 
 export function getFinancialContextPrompt(
-    metrics: FinancialMetrics,
-    peerMetrics?: Partial<FinancialMetrics>[],
-    dataSource: "live" | "mock" = "mock"
+  metrics: FinancialMetrics,
+  peerMetrics?: Partial<FinancialMetrics>[],
+  dataSource: "live" | "mock" = "mock"
 ): string {
-    const formatNum = (n?: number, prefix = "", suffix = "") =>
-        n != null ? `${prefix}${n.toLocaleString()}${suffix}` : "N/A";
+  const fmt = (n?: number, prefix = "", suffix = "") =>
+    n != null ? `${prefix}${n.toLocaleString()}${suffix}` : "N/A";
 
-    const metricsStr = `
-COMPANY: ${metrics.companyName} (${metrics.ticker})
-Sector: ${metrics.sector} | Industry: ${metrics.industry}
-Data Source: ${dataSource === "live" ? "Live API" : "Reference Data (mock)"}
+  const metricsStr = [
+    `COMPANY: ${metrics.companyName} (${metrics.ticker}) | ${metrics.sector} / ${metrics.industry}`,
+    `Data: ${dataSource === "live" ? "Live API" : "Reference Data"}`,
+    "",
+    "VALUATION",
+    `Price: ${fmt(metrics.currentPrice, "$")} | MCap: ${metrics.marketCap ? "$" + (metrics.marketCap / 1e9).toFixed(1) + "B" : "N/A"}`,
+    `P/E: ${fmt(metrics.peRatio, "", "x")} | P/B: ${fmt(metrics.pbRatio, "", "x")} | P/S: ${fmt(metrics.psRatio, "", "x")} | EV/EBITDA: ${fmt(metrics.evToEbitda, "", "x")}`,
+    `EPS: ${fmt(metrics.eps, "$")} | 52W: ${fmt(metrics.fiftyTwoWeekLow, "$")}–${fmt(metrics.fiftyTwoWeekHigh, "$")} | Beta: ${fmt(metrics.beta)}`,
+    "",
+    "PROFITABILITY",
+    `Rev: ${metrics.revenue ? "$" + (metrics.revenue / 1e9).toFixed(1) + "B" : "N/A"} (+${fmt(metrics.revenueGrowthYoY, "", "%")} YoY)`,
+    `Gross Margin: ${fmt(metrics.grossMargin, "", "%")} | Op Margin: ${fmt(metrics.operatingMargin, "", "%")} | Net Margin: ${fmt(metrics.netMargin, "", "%")}`,
+    `EBITDA: ${metrics.ebitda ? "$" + (metrics.ebitda / 1e9).toFixed(1) + "B" : "N/A"}`,
+    "",
+    "RETURNS & BALANCE SHEET",
+    `ROE: ${fmt(metrics.roe, "", "%")} | ROA: ${fmt(metrics.roa, "", "%")} | FCF: ${metrics.freeCashFlow ? "$" + (metrics.freeCashFlow / 1e9).toFixed(1) + "B" : "N/A"}`,
+    `D/E: ${fmt(metrics.debtToEquity, "", "x")} | Current Ratio: ${fmt(metrics.currentRatio, "", "x")} | Div Yield: ${fmt(metrics.dividendYield, "", "%")}`,
+  ].join("\n");
 
---- VALUATION ---
-Current Price: ${formatNum(metrics.currentPrice, "$")}
-Market Cap: ${metrics.marketCap ? `$${(metrics.marketCap / 1e9).toFixed(1)}B` : "N/A"}
-P/E Ratio: ${formatNum(metrics.peRatio, "", "x")}
-P/B Ratio: ${formatNum(metrics.pbRatio, "", "x")}
-P/S Ratio: ${formatNum(metrics.psRatio, "", "x")}
-EV/EBITDA: ${formatNum(metrics.evToEbitda, "", "x")}
-EPS: ${formatNum(metrics.eps, "$")}
-52-Week High: ${formatNum(metrics.fiftyTwoWeekHigh, "$")}
-52-Week Low: ${formatNum(metrics.fiftyTwoWeekLow, "$")}
-Beta: ${formatNum(metrics.beta)}
-
---- PROFITABILITY ---
-Revenue: ${metrics.revenue ? `$${(metrics.revenue / 1e9).toFixed(1)}B` : "N/A"}
-Revenue Growth YoY: ${formatNum(metrics.revenueGrowthYoY, "", "%")}
-Gross Margin: ${formatNum(metrics.grossMargin, "", "%")}
-Operating Margin: ${formatNum(metrics.operatingMargin, "", "%")}
-Net Margin: ${formatNum(metrics.netMargin, "", "%")}
-EBITDA: ${metrics.ebitda ? `$${(metrics.ebitda / 1e9).toFixed(1)}B` : "N/A"}
-
---- RETURNS & EFFICIENCY ---
-ROE: ${formatNum(metrics.roe, "", "%")}
-ROA: ${formatNum(metrics.roa, "", "%")}
-Free Cash Flow: ${metrics.freeCashFlow ? `$${(metrics.freeCashFlow / 1e9).toFixed(1)}B` : "N/A"}
-FCF Yield: ${formatNum(metrics.freeCashFlowYield, "", "%")}
-Dividend Yield: ${formatNum(metrics.dividendYield, "", "%")}
-
---- BALANCE SHEET ---
-Debt/Equity: ${formatNum(metrics.debtToEquity, "", "x")}
-Current Ratio: ${formatNum(metrics.currentRatio, "", "x")}
-`.trim();
-
-    let peerStr = "";
-    if (peerMetrics && peerMetrics.length > 0) {
-        peerStr = "\n\n--- PEER DATA ---\n";
-        for (const peer of peerMetrics) {
-            peerStr += `${peer.ticker} (${peer.companyName}): P/E=${formatNum(peer.peRatio, "", "x")}, Rev Growth=${formatNum(peer.revenueGrowthYoY, "", "%")}, EBITDA Margin=${formatNum(peer.ebitdaMargin, "", "%")}, ROE=${formatNum(peer.roe, "", "%")}, D/E=${formatNum(peer.debtToEquity, "", "x")}\n`;
-        }
+  let peerStr = "";
+  if (peerMetrics && peerMetrics.length > 0) {
+    peerStr = "\n\nPEER COMPARISON\n";
+    for (const peer of peerMetrics) {
+      peerStr += `${peer.ticker}: P/E=${fmt(peer.peRatio, "", "x")}, RevGrowth=${fmt(peer.revenueGrowthYoY, "", "%")}, Margin=${fmt(peer.ebitdaMargin, "", "%")}, ROE=${fmt(peer.roe, "", "%")}, D/E=${fmt(peer.debtToEquity, "", "x")}\n`;
     }
+  }
 
-    return metricsStr + peerStr;
+  return metricsStr + peerStr;
 }
 
+// ── Full schema for Deep Mode  (~1500 tokens) ─────────────────────────────────
 export function getMemoSchema(): string {
-    return `
-Return ONLY a JSON object with this exact structure (no markdown, no extra text):
+  return `Return ONLY a JSON object (no markdown, no extra text):
 {
   "id": "<uuid>",
   "ticker": "<TICKER>",
@@ -123,7 +98,7 @@ Return ONLY a JSON object with this exact structure (no markdown, no extra text)
     "summary": "<2-3 sentence financial summary>",
     "highlights": ["<positive highlight 1>", "<positive highlight 2>"],
     "concerns": ["<concern 1>"],
-    "metrics": { /* subset of FinancialMetrics — key numbers only */ }
+    "metrics": {}
   },
   "peerComparison": [
     { "ticker": "PEER1", "companyName": "...", "peRatio": 0, "revenueGrowthYoY": 0, "grossMargin": 0, "roe": 0, "debtToEquity": 0, "marketCap": 0 }
@@ -142,9 +117,9 @@ Return ONLY a JSON object with this exact structure (no markdown, no extra text)
     { "risk": "<risk description>", "severity": "high" | "medium" | "low", "mitigation": "<optional>" }
   ],
   "scenarioAnalysis": {
-    "bull": { "revenueGrowth": 0, "marginExpansion": 0, "impliedValue": "<price target or range>", "keyDriver": "<what drives bull case>", "probability": 30 },
-    "base": { "revenueGrowth": 0, "marginExpansion": 0, "impliedValue": "<price target or range>", "keyDriver": "<consensus expectation>", "probability": 50 },
-    "bear": { "revenueGrowth": 0, "marginExpansion": 0, "impliedValue": "<price target or range>", "keyDriver": "<what drives bear case>", "probability": 20 },
+    "bull": { "revenueGrowth": 0, "marginExpansion": 0, "impliedValue": "<price target>", "keyDriver": "<what drives bull>", "probability": 30 },
+    "base": { "revenueGrowth": 0, "marginExpansion": 0, "impliedValue": "<price target>", "keyDriver": "<consensus>", "probability": 50 },
+    "bear": { "revenueGrowth": 0, "marginExpansion": 0, "impliedValue": "<price target>", "keyDriver": "<what drives bear>", "probability": 20 },
     "sensitivityNote": "<note on key variables>"
   },
   "valuationInsight": {
@@ -163,16 +138,45 @@ Return ONLY a JSON object with this exact structure (no markdown, no extra text)
     "explanation": "<why this score>"
   },
   "discrepancies": [
-    { "category": "earnings" | "guidance" | "growth" | "risk" | "other", "claim": "<what mgmt said>", "evidence": "<what data shows>", "severity": "high" | "medium" | "low" }
+    { "category": "earnings" | "guidance" | "growth" | "risk" | "other", "claim": "<mgmt said>", "evidence": "<data shows>", "severity": "high" | "medium" | "low" }
   ],
   "assumptions": ["<assumption 1>", "<assumption 2>"],
   "dataSourcesUsed": ["Finnhub", "Alpha Vantage", "Public Filings"],
-  "nextStepsRecommended": ["<follow-up analysis suggestion>"]
+  "nextStepsRecommended": ["<follow-up suggestion>"]
+}`;
+}
+
+// ── LEAN schema for Quick Scan (~300 tokens vs ~1500 for full) ────────────────
+// All required InvestmentMemo fields are present; non-critical ones use defaults.
+export function getQuickMemoSchema(): string {
+  return `Return ONLY a valid JSON object. No markdown code fences. No extra text before or after the JSON.
+Required structure:
+{
+  "id": "generate-a-uuid-here",
+  "ticker": "TICKER_SYMBOL",
+  "companyName": "Full Company Name",
+  "analysisDate": "2026-02-25",
+  "mode": "quick",
+  "userQuery": "the user query text",
+  "overallSentiment": "bullish",
+  "businessOverview": { "summary": "2 sentence description", "coreProducts": ["product1"], "competitiveAdvantages": ["moat1"] },
+  "financialPerformance": { "summary": "2 sentences with specific numbers", "highlights": ["highlight1", "highlight2"], "concerns": ["concern1"], "metrics": {} },
+  "peerComparison": [],
+  "bullThesis": { "points": ["bull point 1", "bull point 2"], "keyMetrics": [], "catalysts": [] },
+  "bearThesis": { "points": ["risk 1"], "keyMetrics": [], "catalysts": [] },
+  "keyRisks": [{ "risk": "description", "severity": "medium", "mitigation": "" }],
+  "scenarioAnalysis": { "bull": { "revenueGrowth": 15, "marginExpansion": 2, "impliedValue": "N/A", "keyDriver": "", "probability": 30 }, "base": { "revenueGrowth": 8, "marginExpansion": 0, "impliedValue": "N/A", "keyDriver": "", "probability": 50 }, "bear": { "revenueGrowth": 2, "marginExpansion": -2, "impliedValue": "N/A", "keyDriver": "", "probability": 20 }, "sensitivityNote": "" },
+  "valuationInsight": { "summary": "one sentence valuation view", "methodology": "Comps", "fairValueRange": "N/A", "currentPriceVsFairValue": "fairly valued", "note": "" },
+  "confidenceScore": { "overall": 70, "dataCompleteness": 70, "sourceReliability": 70, "contradictionPenalty": 0, "label": "Medium", "explanation": "Based on reference data" },
+  "discrepancies": [],
+  "assumptions": ["Based on reference financial data"],
+  "dataSourcesUsed": ["Reference Data"],
+  "nextStepsRecommended": ["Run Deep Mode for comprehensive analysis"]
 }`;
 }
 
 export function getClarifyPrompt(ticker: string, mode: ResearchMode, userQuery: string): string {
-    return `You are EquityMind AI. A user wants a ${mode.toUpperCase()} MODE analysis of ${ticker}.
+  return `You are EquityMind AI. A user wants a ${mode.toUpperCase()} MODE analysis of ${ticker}.
 
 User Query: "${userQuery}"
 

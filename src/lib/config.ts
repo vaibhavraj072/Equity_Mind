@@ -4,12 +4,14 @@
 
 export const config = {
     models: {
-        quick: "google/gemini-2.0-flash-exp:free",
-        deep: "anthropic/claude-3.5-sonnet",
-        fallback: "openai/gpt-4o-mini",
+        // Google Gemini — via Google AI Studio API (OpenAI-compatible endpoint)
+        quick: "gemini-2.0-flash",           // fast, generous free quota
+        deep: "gemini-2.5-pro-exp-03-25",   // best reasoning
+        fallback: "gemini-1.5-flash",           // always-on stable fallback
     },
     openRouter: {
-        baseUrl: "https://openrouter.ai/api/v1",
+        // Kept for siteName reference used in llm-client headers
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
         siteUrl: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
         siteName: "EquityMind AI",
     },
@@ -25,9 +27,9 @@ export const config = {
     },
     defaultUserProfile: {
         riskTolerance: "moderate" as const,
-        preferredKPIs: ["Revenue Growth", "EBITDA", "Free Cash Flow"],
-        sectorsOfInterest: ["Technology", "Healthcare"],
-        geographicFocus: ["United States"],
+        preferredKPIs: ["Revenue Growth", "EBITDA", "Free Cash Flow", "Debt/Equity"],
+        sectorsOfInterest: ["Information Technology", "Banking & Finance", "FMCG", "Pharma"],
+        geographicFocus: ["India", "NSE", "BSE"],
         investmentHorizon: "medium" as const,
     },
     dataFiles: {
