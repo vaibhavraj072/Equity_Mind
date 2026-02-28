@@ -59,34 +59,39 @@ export async function runDeepMode(
     const financialContext = getFinancialContextPrompt(metrics, peerMetrics, dataSource);
     const schema = getMemoSchema();
 
+    // Merge context into prompt
     const contextStr = context && Object.keys(context).length > 0
         ? `\nUser's clarifying answers:\n${Object.entries(context).map(([k, v]) => `- ${k}: ${v}`).join("\n")}`
         : "";
 
-    const userMessage = `Perform a DEEP MODE fundamental analysis of ${ticker}.
+    // Build the single unified prompt string
+    const userMessage = `DEEP MODE ANALYSIS: ${ticker}
+--------------------------------------------------
+${systemPrompt}
 
-Financial Data:
+FINANCIAL DATA:
 ${financialContext}
 
-User Query: ${userQuery}${contextStr}
+USER QUERY: ${userQuery}${contextStr}
 
-Additional Instructions:
-- For the ${profile.riskTolerance} risk tolerance profile, weight risks appropriately
-- Emphasize these KPIs: ${profile.preferredKPIs.join(", ")}
-- Investment horizon: ${profile.investmentHorizon}-term
-- Detect any contradictions between reported metrics and typical industry benchmarks
-- Build a complete 9-section investment memo
+REQUIRED FOCUS:
+- Risk Profile: ${profile.riskTolerance}
+- Highlight KPIs: ${profile.preferredKPIs.join(", ")}
+- Horizon: ${profile.investmentHorizon}
 
 ${schema}`;
 
+    console.log(`[deep-mode] Initiating LLM call for ${ticker} (Deep Mode)`);
+
+    // Call the LLM with a more reasonable max_tokens budget (2500 instead of 6000)
+    // 6000 tokens takes ~45 seconds to generate and frequently triggers free-tier 429 quota exhaustion mid-stream.
     const raw = await callWithFallback("deep", {
-        messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userMessage },
-        ],
+        messages: [{ role: "user", content: userMessage }],
         temperature: 0.2,
-        max_tokens: 6000,
+        max_tokens: 2500,
     });
+
+    console.log(`[deep-mode] LLM call complete, parsing JSON...`);
     const memo = parseMemoJson(raw, ticker, userQuery);
 
     memo.confidenceScore = calculateConfidenceScore(metrics, memo.discrepancies || [], dataSource);
