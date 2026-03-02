@@ -11,17 +11,21 @@ interface MetricItem {
 
 function formatValue(value: number, format: MetricItem["format"]): string {
     switch (format) {
-        case "currency": return `$${value.toFixed(2)}`;
+        case "currency": return `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
         case "percent": return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
         case "multiple": return `${value.toFixed(1)}x`;
-        case "billions": return `$${(value / 1e9).toFixed(1)}B`;
+        case "billions": {
+            // Indian Crore: 1 Cr = 1e7
+            if (Math.abs(value) >= 1e12) return `₹${(value / 1e12).toFixed(1)} L.Cr`;
+            return `₹${(value / 1e7).toFixed(1)} Cr`;
+        }
         default: return value.toFixed(2);
     }
 }
 
 export default function MetricsGrid({ metrics }: { metrics: Partial<FinancialMetrics> }) {
     const items: MetricItem[] = [
-        { label: "Current Price", value: metrics.currentPrice, format: "currency", highlight: true },
+        { label: "Current Price (CMP)", value: metrics.currentPrice, format: "currency", highlight: true },
         { label: "Market Cap", value: metrics.marketCap, format: "billions", highlight: true },
         { label: "Revenue", value: metrics.revenue, format: "billions" },
         { label: "Rev Growth YoY", value: metrics.revenueGrowthYoY, format: "percent", highlight: true },
@@ -48,8 +52,8 @@ export default function MetricsGrid({ metrics }: { metrics: Partial<FinancialMet
                     style={item.highlight ? { borderColor: "rgba(232,180,0,0.12)" } : {}}>
                     <span className="metric-label">{item.label}</span>
                     <span className={`metric-value text-lg ${item.format === "percent" && item.value != null
-                            ? item.value >= 0 ? "text-emerald-400" : "text-red-400"
-                            : "text-white"
+                        ? item.value >= 0 ? "text-emerald-400" : "text-red-400"
+                        : "text-white"
                         }`}>
                         {item.value != null ? formatValue(item.value, item.format) : "—"}
                     </span>

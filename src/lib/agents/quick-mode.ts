@@ -19,8 +19,15 @@ import { calculateConfidenceScore } from "./confidence-scorer";
 // ── Helper utilities ──────────────────────────────────────────────────────────
 const pct = (n?: number) => n != null ? `${n.toFixed(1)}%` : "N/A";
 const px = (n?: number) => n != null ? `${n.toFixed(1)}x` : "N/A";
-const usd = (n?: number) => n != null ? `$${n.toFixed(2)}` : "N/A";
-const bil = (n?: number) => n != null ? `$${(n / 1e9).toFixed(1)}B` : "N/A";
+/** ₹ per share (current price, EPS) */
+const inr = (n?: number) => n != null ? `₹${n.toFixed(2)}` : "N/A";
+/** Values in Indian Crore (1 Cr = 1e7). For very large caps use Lakh Crore */
+const cr = (n?: number) => {
+    if (n == null) return "N/A";
+    const abs = Math.abs(n);
+    if (abs >= 1e12) return `₹${(n / 1e12).toFixed(1)} L.Cr`;
+    return `₹${(n / 1e7).toFixed(1)} Cr`;
+};
 
 // ── Signal scoring — returns -1 (bearish), 0 (neutral), +1 (bullish) ─────────
 function score(value: number | undefined, low: number, high: number): -1 | 0 | 1 {
@@ -39,7 +46,7 @@ function buildSignals(m: FinancialMetrics): Signal[] {
         { label: `Operating margin ${pct(m.operatingMargin)}`, value: pct(m.operatingMargin), score: score(m.operatingMargin, 5, 20) },
         { label: `Net margin ${pct(m.netMargin)}`, value: pct(m.netMargin), score: score(m.netMargin, 3, 15) },
         { label: `ROE ${pct(m.roe)}`, value: pct(m.roe), score: score(m.roe, 8, 20) },
-        { label: `Free cash flow ${bil(m.freeCashFlow)}`, value: bil(m.freeCashFlow), score: m.freeCashFlow != null ? (m.freeCashFlow > 0 ? 1 : -1) : 0 },
+        { label: `FCF ${cr(m.freeCashFlow)}`, value: cr(m.freeCashFlow), score: m.freeCashFlow != null ? (m.freeCashFlow > 0 ? 1 : -1) : 0 },
         { label: `P/E ratio ${px(m.peRatio)}`, value: px(m.peRatio), score: score(m.peRatio, 0, 35) === 1 ? -1 : score(m.peRatio, 5, 35) },
         { label: `Debt/Equity ${px(m.debtToEquity)}`, value: px(m.debtToEquity), score: score(m.debtToEquity, 0, 1) === 1 ? 1 : score(m.debtToEquity, 0, 2) },
         { label: `Current ratio ${px(m.currentRatio)}`, value: px(m.currentRatio), score: score(m.currentRatio, 1.0, 2.0) },
@@ -61,11 +68,11 @@ function buildBullPoints(m: FinancialMetrics, signals: Signal[]): string[] {
     pts.push(...positive.slice(0, 3));
 
     if (m.dividendYield && m.dividendYield > 1)
-        pts.push(`Dividend yield of ${pct(m.dividendYield)} provides income cushion`);
+        pts.push(`Dividend yield of ${pct(m.dividendYield)} provides steady income`);
     if (m.freeCashFlowYield && m.freeCashFlowYield > 3)
-        pts.push(`Strong FCF yield of ${pct(m.freeCashFlowYield)} indicates cash generation`);
+        pts.push(`Strong FCF yield of ${pct(m.freeCashFlowYield)} indicates healthy cash generation`);
     if (m.currentPrice && m.fiftyTwoWeekLow && m.currentPrice < m.fiftyTwoWeekHigh! * 0.85)
-        pts.push(`Trades ${((1 - m.currentPrice / m.fiftyTwoWeekHigh!) * 100).toFixed(0)}% below 52-week high — potential mean-reversion`);
+        pts.push(`Trading ${((1 - m.currentPrice / m.fiftyTwoWeekHigh!) * 100).toFixed(0)}% below 52-week high (₹${m.fiftyTwoWeekHigh!.toFixed(0)}) — potential mean-reversion opportunity`);
 
     return pts.length ? pts : ["Requires deeper analysis — run Deep Mode for full thesis"];
 }
@@ -114,40 +121,40 @@ function buildValuationInsight(m: FinancialMetrics): InvestmentMemo["valuationIn
     let valued: "undervalued" | "fairly valued" | "overvalued" = "fairly valued";
 
     if (pe == null) {
-        summary = `Limited valuation data available. Current price ${usd(m.currentPrice)}, 52W range ${usd(m.fiftyTwoWeekLow)}–${usd(m.fiftyTwoWeekHigh)}.`;
+        summary = `Valuation data limited. CMP ₹${m.currentPrice?.toFixed(0) ?? "N/A"}, 52W range ₹${m.fiftyTwoWeekLow?.toFixed(0) ?? "N/A"}–₹${m.fiftyTwoWeekHigh?.toFixed(0) ?? "N/A"}.`;
     } else if (pe < 12) {
-        summary = `P/E of ${px(pe)} is below typical market multiples, suggesting potential undervaluation relative to peers.`;
+        summary = `P/E of ${px(pe)} is below Nifty/Sensex average multiples, suggesting possible undervaluation on NSE/BSE.`;
         valued = "undervalued";
     } else if (pe <= 30) {
-        summary = `P/E of ${px(pe)} is within a reasonable range. Current price ${usd(m.currentPrice)} appears fairly valued vs fundamentals.`;
+        summary = `P/E of ${px(pe)} is in a reasonable band. CMP ₹${m.currentPrice?.toFixed(0) ?? "N/A"} appears fairly valued versus fundamentals.`;
         valued = "fairly valued";
     } else {
-        summary = `Elevated P/E of ${px(pe)} implies premium valuation — requires above-average growth to justify. Check EV/EBITDA (${px(m.evToEbitda)}) for confirmation.`;
+        summary = `Elevated P/E of ${px(pe)} signals premium valuation — above-average growth needed to justify. Cross-check EV/EBITDA (${px(m.evToEbitda)}).`;
         valued = "overvalued";
     }
 
     return {
         summary,
-        methodology: "Comparable multiples (P/E, EV/EBITDA, P/S)",
+        methodology: "Relative valuation (P/E, EV/EBITDA, P/B) — NSE/BSE comparable comps",
         fairValueRange: "N/A — run Deep Mode for price target",
         currentPriceVsFairValue: valued,
-        note: "Quick scan uses trailing multiples only. Enable Deep Mode for DCF-based fair value.",
+        note: "Quick scan uses trailing multiples only. Enable Deep Mode for DCF-based target price (₹).",
     };
 }
 
 // ── Business overview ─────────────────────────────────────────────────────────
 function buildBusinessOverview(m: FinancialMetrics, query: string): InvestmentMemo["businessOverview"] {
-    const rev = m.revenue ? `Revenue ${bil(m.revenue)} ` : "";
-    const mcap = m.marketCap ? `with ${bil(m.marketCap)} market cap. ` : ". ";
+    const rev = m.revenue ? `Revenue ${cr(m.revenue)} ` : "";
+    const mcap = m.marketCap ? `Market Cap ${cr(m.marketCap)}. ` : ". ";
     const growth = m.revenueGrowthYoY != null ? `Revenue grew ${pct(m.revenueGrowthYoY)} YoY. ` : "";
-    const margin = m.netMargin != null ? `Net margin stands at ${pct(m.netMargin)}.` : "";
+    const margin = m.netMargin != null ? `Net margin at ${pct(m.netMargin)}.` : "";
 
     return {
-        summary: `${m.companyName} operates in the ${m.sector}/${m.industry} space. ${rev}${mcap}${growth}${margin}`,
+        summary: `${m.companyName} is listed on NSE/BSE and operates in the ${m.sector}/${m.industry} space. ${rev}${mcap}${growth}${margin}`,
         coreProducts: [m.sector || "Diversified", m.industry || "N/A"],
         competitiveAdvantages: [
-            m.grossMargin && m.grossMargin > 40 ? `High gross margin (${pct(m.grossMargin)}) indicates pricing power` : `Operating in ${m.industry || "competitive"} sector`,
-            m.roe && m.roe > 15 ? `Strong ROE of ${pct(m.roe)} suggests efficient capital allocation` : "Established market position",
+            m.grossMargin && m.grossMargin > 40 ? `High gross margin (${pct(m.grossMargin)}) — strong pricing power in Indian market` : `Operating in the ${m.industry || "competitive"} sector`,
+            m.roe && m.roe > 15 ? `ROE of ${pct(m.roe)} — efficient capital deployment` : "Established market presence",
         ],
         managementHighlights: query || undefined,
     };
@@ -190,11 +197,11 @@ function buildFinancialPerformance(
     const highlights = signals.filter(s => s.score === 1).map(s => s.label);
     const concerns = signals.filter(s => s.score === -1).map(s => s.label);
 
-    const rev = m.revenue ? `Revenue ${bil(m.revenue)} ` : "";
+    const rev = m.revenue ? `Revenue ${cr(m.revenue)} ` : "";
     const growth = m.revenueGrowthYoY != null ? `(${pct(m.revenueGrowthYoY)} YoY growth), ` : "";
-    const ebitda = m.ebitda ? `EBITDA ${bil(m.ebitda)}, ` : "";
-    const margin = m.netMargin != null ? `net margin ${pct(m.netMargin)}.` : "";
-    const fcf = m.freeCashFlow != null ? ` FCF: ${bil(m.freeCashFlow)}.` : "";
+    const ebitda = m.ebitda ? `EBITDA ${cr(m.ebitda)}, ` : "";
+    const margin = m.netMargin != null ? `Net margin ${pct(m.netMargin)}.` : "";
+    const fcf = m.freeCashFlow != null ? ` FCF: ${cr(m.freeCashFlow)}.` : "";
 
     return {
         summary: `${rev}${growth}${ebitda}${margin}${fcf}`,
@@ -258,12 +265,13 @@ export async function runQuickMode(
             "Run Deep Mode for forward-looking analysis and peer benchmarking",
         ],
         dataSourcesUsed: dataSource === "live"
-            ? ["Finnhub", "Alpha Vantage", "Live Market Data"]
-            : ["Reference Financial Data"],
+            ? ["NSE/BSE Live Feed", "Finnhub", "Alpha Vantage", "Yahoo Finance (.NS/.BO)"]
+            : ["Reference Financial Data (NSE/BSE)"],
         nextStepsRecommended: [
-            "Run Deep Mode for comprehensive DCF valuation and peer comparison",
-            `Review latest earnings call for ${ticker}`,
-            `Check sector trends for ${metrics.sector || "the sector"}`,
+            "Run Deep Mode for comprehensive DCF valuation and peer benchmarking",
+            `Review latest quarterly results (Q results) for ${ticker}`,
+            `Track SEBI filings and shareholding pattern changes for ${ticker}`,
+            `Check sector rotation trends for ${metrics.sector || "the sector"} on NSE`,
         ],
     };
 

@@ -7,14 +7,15 @@ export function cn(...inputs: ClassValue[]) {
 
 export function formatCurrency(value: number, compact = false): string {
     if (compact) {
-        if (Math.abs(value) >= 1e12) return `$${(value / 1e12).toFixed(1)}T`;
-        if (Math.abs(value) >= 1e9) return `$${(value / 1e9).toFixed(1)}B`;
-        if (Math.abs(value) >= 1e6) return `$${(value / 1e6).toFixed(1)}M`;
-        return `$${value.toFixed(0)}`;
+        // Indian scale: Lakh Crore > Crore > Lakh > smaller
+        if (Math.abs(value) >= 1e12) return `₹${(value / 1e12).toFixed(1)} L.Cr`;
+        if (Math.abs(value) >= 1e7) return `₹${(value / 1e7).toFixed(1)} Cr`;
+        if (Math.abs(value) >= 1e5) return `₹${(value / 1e5).toFixed(1)} L`;
+        return `₹${value.toFixed(0)}`;
     }
-    return new Intl.NumberFormat("en-US", {
+    return new Intl.NumberFormat("en-IN", {
         style: "currency",
-        currency: "USD",
+        currency: "INR",
         maximumFractionDigits: 0,
     }).format(value);
 }

@@ -1,38 +1,55 @@
-/**
- * LLM client using the official Google Generative AI SDK.
- *
- * Free-tier limits per model (gemini-2.0-flash, gemini-1.5-flash, gemini-1.5-flash-8b):
- *   15 RPM  |  1,500 RPD  |  1M TPM
- *
- * Retry strategy:
- *   - On ANY 429 / quota error: wait 65 s (full 60 s window + buffer) then retry ONCE.
- *   - If still failing: try the next model in the list.
- *   - 404 / model-not-found: skip immediately (no retry).
- */
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
 
-import {
-    GoogleGenerativeAI,
-    GoogleGenerativeAIResponseError,
-    HarmBlockThreshold,
-    HarmCategory,
-} from "@google/generative-ai";
+/* -------------------------------------------------------------------------- */
+/*                              TYPE DEFINITIONS                               */
+/* -------------------------------------------------------------------------- */
 
-const RETRY_WAIT_MS = 65_000;   // 65 s — full 60 s quota window + 5 s buffer
+export interface Message {
+    role: "system" | "user" | "assistant";
+    content: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                            GEMINI CLIENT SETUP                              */
+/* -------------------------------------------------------------------------- */
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? "");
+
+/* -------------------------------------------------------------------------- */
+/*                             SAFETY SETTINGS                                 */
+/* -------------------------------------------------------------------------- */
 
 const SAFETY_SETTINGS = [
-    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    {
+        category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+        threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+        category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+        threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+        category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+        threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+        category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+        threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
 ];
 
-// Models ordered from best to most-available
+/* -------------------------------------------------------------------------- */
+/*                              MODEL FALLBACK LISTS                           */
+/* -------------------------------------------------------------------------- */
+
+/** Quick mode: prefer the fastest model; fall back to stable flash. */
 const QUICK_MODELS = [
     "gemini-2.0-flash",
     "gemini-1.5-flash",
     "gemini-1.5-flash-8b",
 ];
 
+/** Deep mode: prefer best reasoning model; fall back gracefully. */
 const DEEP_MODELS = [
     "gemini-2.5-pro-exp-03-25",
     "gemini-2.0-flash",
@@ -40,97 +57,105 @@ const DEEP_MODELS = [
     "gemini-1.5-flash",
 ];
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/* -------------------------------------------------------------------------- */
+/*                              ERROR CLASSIFIERS                              */
+/* -------------------------------------------------------------------------- */
 
-// ── Error classification ──────────────────────────────────────────────────────
-function isRateLimit(err: unknown): boolean {
-    const msg = String(err instanceof Error ? err.message : err).toLowerCase();
-    // Gemini SDK throws "Resource has been exhausted" or contains 429
-    return (
-        msg.includes("429") ||
-        msg.includes("resource has been exhausted") ||
-        msg.includes("quota") ||
-        msg.includes("rate limit") ||
-        msg.includes("too many requests")
-    );
-}
-
-function isModelUnavailable(err: unknown): boolean {
-    const msg = String(err instanceof Error ? err.message : err).toLowerCase();
+function isModelUnavailable(err: any): boolean {
+    const msg: string = err?.message ?? String(err);
     return (
         msg.includes("404") ||
         msg.includes("not found") ||
-        msg.includes("not a valid model") ||
-        msg.includes("invalid model") ||
-        msg.includes("no endpoints")
+        msg.includes("model not found") ||
+        msg.includes("unavailable") ||
+        msg.includes("FAILED_PRECONDITION")
     );
 }
 
-export type Message = { role: "system" | "user" | "assistant"; content: string };
+function isRateLimit(err: any): boolean {
+    const msg: string = err?.message ?? String(err);
+    return (
+        msg.includes("429") ||
+        msg.includes("quota") ||
+        msg.includes("RESOURCE_EXHAUSTED") ||
+        msg.includes("rate limit")
+    );
+}
 
-// ── callWithFallback ──────────────────────────────────────────────────────────
+/* -------------------------------------------------------------------------- */
+/*                           MAIN LLM CLIENT EXPORT                           */
+/* -------------------------------------------------------------------------- */
+
 export async function callWithFallback(
     mode: "quick" | "deep",
     params: { messages: Message[]; temperature?: number; max_tokens?: number }
 ): Promise<string> {
+    if (!process.env.GEMINI_API_KEY) {
+        throw new Error("Missing GEMINI_API_KEY in environment variables.");
+    }
+
     const modelList = mode === "quick" ? QUICK_MODELS : DEEP_MODELS;
 
-    // Gemini accepts a single text prompt — merge system + user messages
-    const systemPart = params.messages.find((m) => m.role === "system")?.content ?? "";
-    const userPart = params.messages.find((m) => m.role === "user")?.content ?? "";
-    const prompt = systemPart ? `${systemPart}\n\n---\n\n${userPart}` : userPart;
+    const systemPart =
+        params.messages.find((m) => m.role === "system")?.content ?? "";
+    const userPart =
+        params.messages.find((m) => m.role === "user")?.content ?? "";
+
+    const prompt = systemPart
+        ? `${systemPart}\n\n---\n\n${userPart}`
+        : userPart;
 
     for (const modelName of modelList) {
-        // ── Attempt 1 ──────────────────────────────────────────────────────
         try {
-            console.log(`[gemini] ${modelName} — attempt 1`);
-            const result = await genAI
-                .getGenerativeModel({ model: modelName, safetySettings: SAFETY_SETTINGS, generationConfig: { temperature: params.temperature ?? 0.2, maxOutputTokens: params.max_tokens ?? 1500 } })
-                .generateContent(prompt);
-            const text = result.response.text();
-            console.log(`[gemini] ✓ ${modelName}`);
-            return text;
+            console.log(`[gemini] Trying ${modelName}`);
 
-        } catch (e1) {
-            if (isModelUnavailable(e1)) {
-                console.warn(`[gemini] ✗ ${modelName} not available — skipping`);
-                continue; // next model, no retry
-            }
-            if (!isRateLimit(e1)) {
-                // Fatal: bad API key, safety block, malformed request, etc.
-                console.error(`[gemini] Fatal on ${modelName}: ${e1 instanceof Error ? e1.message : e1}`);
-                throw e1;
-            }
-            // Rate limited — wait for the quota window to expire
-            console.warn(`[gemini] 429 on ${modelName} — waiting ${RETRY_WAIT_MS / 1000}s for quota reset...`);
-            await sleep(RETRY_WAIT_MS);
-        }
+            const model = genAI.getGenerativeModel({
+                model: modelName,
+                safetySettings: SAFETY_SETTINGS,
+                generationConfig: {
+                    temperature: params.temperature ?? 0.2,
+                    maxOutputTokens: params.max_tokens ?? 1500,
+                },
+            });
 
-        // ── Attempt 2 (after 65 s wait) ────────────────────────────────────
-        try {
-            console.log(`[gemini] ${modelName} — attempt 2 (after quota reset)`);
-            const result = await genAI
-                .getGenerativeModel({ model: modelName, safetySettings: SAFETY_SETTINGS, generationConfig: { temperature: params.temperature ?? 0.2, maxOutputTokens: params.max_tokens ?? 1500 } })
-                .generateContent(prompt);
-            const text = result.response.text();
-            console.log(`[gemini] ✓ ${modelName} (attempt 2)`);
-            return text;
+            const result = await model.generateContent(prompt);
 
-        } catch (e2) {
-            if (isModelUnavailable(e2)) {
-                console.warn(`[gemini] ✗ ${modelName} not available — skipping`);
+            const text = result?.response?.text?.();
+
+            if (!text || text.trim().length === 0) {
+                console.warn(
+                    `[gemini] ${modelName} returned empty response — trying next model`
+                );
                 continue;
             }
-            const msg2 = e2 instanceof Error ? e2.message : String(e2);
-            console.warn(`[gemini] ✗ ${modelName} still failing after retry (${msg2}) — trying next model`);
-            // fall through to next model
+
+            console.log(`[gemini] ✓ Success on ${modelName}`);
+            return text;
+
+        } catch (err: any) {
+            if (isModelUnavailable(err)) {
+                console.warn(
+                    `[gemini] ${modelName} unavailable — skipping`
+                );
+                continue;
+            }
+
+            if (isRateLimit(err)) {
+                console.warn(
+                    `[gemini] ${modelName} rate-limited — trying next model`
+                );
+                continue;
+            }
+
+            console.error(
+                `[gemini] Fatal error on ${modelName}:`,
+                err?.message || err
+            );
+            throw err;
         }
     }
 
     throw new Error(
-        "[gemini] All Gemini models rate-limited. " +
-        "Free tier = 15 req/min · 1,500 req/day. " +
-        "Consider enabling billing at https://console.cloud.google.com/billing to lift limits."
+        "All Gemini models unavailable or rate-limited."
     );
 }

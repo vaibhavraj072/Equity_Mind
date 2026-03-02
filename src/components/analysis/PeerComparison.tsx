@@ -11,7 +11,10 @@ function MetricCell({ value, format = "default", compareValue }: {
     let display = value.toFixed(1);
     if (format === "percent") display = `${value.toFixed(1)}%`;
     if (format === "multiple") display = `${value.toFixed(1)}x`;
-    if (format === "currency") display = `$${(value / 1e9).toFixed(1)}B`;
+    if (format === "currency") {
+        if (Math.abs(value) >= 1e12) display = `₹${(value / 1e12).toFixed(1)} L.Cr`;
+        else display = `₹${(value / 1e7).toFixed(1)} Cr`;
+    }
 
     let color = "text-[var(--text-primary)]";
     if (compareValue != null) {

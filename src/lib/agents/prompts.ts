@@ -44,31 +44,37 @@ export function getFinancialContextPrompt(
   peerMetrics?: Partial<FinancialMetrics>[],
   dataSource: "live" | "mock" = "mock"
 ): string {
+  // Indian-scale currency helpers (used only within this prompt builder)
+  const fmtCr = (n?: number) => {
+    if (n == null) return "N/A";
+    if (Math.abs(n) >= 1e12) return `₹${(n / 1e12).toFixed(1)} L.Cr`;
+    return `₹${(n / 1e7).toFixed(1)} Cr`;
+  };
   const fmt = (n?: number, prefix = "", suffix = "") =>
-    n != null ? `${prefix}${n.toLocaleString()}${suffix}` : "N/A";
+    n != null ? `${prefix}${n.toLocaleString("en-IN")}${suffix}` : "N/A";
 
   const metricsStr = [
     `COMPANY: ${metrics.companyName} (${metrics.ticker}) | ${metrics.sector} / ${metrics.industry}`,
-    `Data: ${dataSource === "live" ? "Live API" : "Reference Data"}`,
+    `Exchange: NSE / BSE | Data: ${dataSource === "live" ? "Live API" : "Reference Data"}`,
     "",
     "VALUATION",
-    `Price: ${fmt(metrics.currentPrice, "$")} | MCap: ${metrics.marketCap ? "$" + (metrics.marketCap / 1e9).toFixed(1) + "B" : "N/A"}`,
+    `CMP: ₹${fmt(metrics.currentPrice)} | MCap: ${fmtCr(metrics.marketCap)}`,
     `P/E: ${fmt(metrics.peRatio, "", "x")} | P/B: ${fmt(metrics.pbRatio, "", "x")} | P/S: ${fmt(metrics.psRatio, "", "x")} | EV/EBITDA: ${fmt(metrics.evToEbitda, "", "x")}`,
-    `EPS: ${fmt(metrics.eps, "$")} | 52W: ${fmt(metrics.fiftyTwoWeekLow, "$")}–${fmt(metrics.fiftyTwoWeekHigh, "$")} | Beta: ${fmt(metrics.beta)}`,
+    `EPS: ₹${fmt(metrics.eps)} | 52W: ₹${fmt(metrics.fiftyTwoWeekLow)}–₹${fmt(metrics.fiftyTwoWeekHigh)} | Beta: ${fmt(metrics.beta)}`,
     "",
     "PROFITABILITY",
-    `Rev: ${metrics.revenue ? "$" + (metrics.revenue / 1e9).toFixed(1) + "B" : "N/A"} (+${fmt(metrics.revenueGrowthYoY, "", "%")} YoY)`,
+    `Revenue: ${fmtCr(metrics.revenue)} (+${fmt(metrics.revenueGrowthYoY, "", "%")} YoY)`,
     `Gross Margin: ${fmt(metrics.grossMargin, "", "%")} | Op Margin: ${fmt(metrics.operatingMargin, "", "%")} | Net Margin: ${fmt(metrics.netMargin, "", "%")}`,
-    `EBITDA: ${metrics.ebitda ? "$" + (metrics.ebitda / 1e9).toFixed(1) + "B" : "N/A"}`,
+    `EBITDA: ${fmtCr(metrics.ebitda)}`,
     "",
     "RETURNS & BALANCE SHEET",
-    `ROE: ${fmt(metrics.roe, "", "%")} | ROA: ${fmt(metrics.roa, "", "%")} | FCF: ${metrics.freeCashFlow ? "$" + (metrics.freeCashFlow / 1e9).toFixed(1) + "B" : "N/A"}`,
+    `ROE: ${fmt(metrics.roe, "", "%")} | ROA: ${fmt(metrics.roa, "", "%")} | FCF: ${fmtCr(metrics.freeCashFlow)}`,
     `D/E: ${fmt(metrics.debtToEquity, "", "x")} | Current Ratio: ${fmt(metrics.currentRatio, "", "x")} | Div Yield: ${fmt(metrics.dividendYield, "", "%")}`,
   ].join("\n");
 
   let peerStr = "";
   if (peerMetrics && peerMetrics.length > 0) {
-    peerStr = "\n\nPEER COMPARISON\n";
+    peerStr = "\n\nPEER COMPARISON (NSE/BSE listed)\n";
     for (const peer of peerMetrics) {
       peerStr += `${peer.ticker}: P/E=${fmt(peer.peRatio, "", "x")}, RevGrowth=${fmt(peer.revenueGrowthYoY, "", "%")}, Margin=${fmt(peer.ebitdaMargin, "", "%")}, ROE=${fmt(peer.roe, "", "%")}, D/E=${fmt(peer.debtToEquity, "", "x")}\n`;
     }
@@ -125,7 +131,7 @@ export function getMemoSchema(): string {
   "valuationInsight": {
     "summary": "<valuation commentary>",
     "methodology": "<DCF / Comps / etc.>",
-    "fairValueRange": "<$X - $Y>",
+    "fairValueRange": "\u20b9X - \u20b9Y",
     "currentPriceVsFairValue": "undervalued" | "fairly valued" | "overvalued",
     "note": "<optional caveat>"
   },
