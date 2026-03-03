@@ -19,12 +19,15 @@ export interface FinancialMetrics {
     marketCap?: number;
     revenue?: number;
     revenueGrowthYoY?: number;
+    earningsGrowthYoY?: number;     // YoY earnings/profit growth (%)
     grossMargin?: number;
+    grossProfit?: number;           // Absolute gross profit (₹)
     operatingMargin?: number;
     netMargin?: number;
     ebitda?: number;
     ebitdaMargin?: number;
     eps?: number;
+    forwardPE?: number;             // Forward P/E estimate
     peRatio?: number;
     pbRatio?: number;
     psRatio?: number;
@@ -35,13 +38,16 @@ export interface FinancialMetrics {
     currentRatio?: number;
     freeCashFlow?: number;
     freeCashFlowYield?: number;
+    operatingCashFlow?: number;     // Operating cash flow (₹)
     dividendYield?: number;
     fiftyTwoWeekHigh?: number;
     fiftyTwoWeekLow?: number;
     currentPrice?: number;
     beta?: number;
+    analystTargetPrice?: number;    // Mean analyst 12-month target price (₹)
     dataTimestamp?: string;
 }
+
 
 // ---- Peer Comparison ----
 export interface PeerComparison {

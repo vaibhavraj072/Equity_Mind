@@ -58,6 +58,19 @@ const DEEP_MODELS = [
 ];
 
 /* -------------------------------------------------------------------------- */
+/*                              PER-MODE TIMEOUTS                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Per-model call budget (ms).
+ * Deep mode: 155 s per attempt — leaves ~25 s for data fetching + post-processing
+ * within the 180 s route budget.
+ * Quick mode: 25 s per attempt.
+ */
+const QUICK_TIMEOUT_MS = 25_000;
+const DEEP_TIMEOUT_MS = 155_000;
+
+/* -------------------------------------------------------------------------- */
 /*                              ERROR CLASSIFIERS                              */
 /* -------------------------------------------------------------------------- */
 
@@ -95,6 +108,11 @@ export async function callWithFallback(
     }
 
     const modelList = mode === "quick" ? QUICK_MODELS : DEEP_MODELS;
+    const timeoutMs = mode === "quick" ? QUICK_TIMEOUT_MS : DEEP_TIMEOUT_MS;
+
+    // Deep mode: more tokens to fit the full JSON memo; lower temperature for factual fidelity
+    const maxTokens = params.max_tokens ?? (mode === "deep" ? 8192 : 2048);
+    const temperature = params.temperature ?? (mode === "deep" ? 0.1 : 0.2);
 
     const systemPart =
         params.messages.find((m) => m.role === "system")?.content ?? "";
@@ -106,19 +124,34 @@ export async function callWithFallback(
         : userPart;
 
     for (const modelName of modelList) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+
         try {
-            console.log(`[gemini] Trying ${modelName}`);
+            console.log(`[gemini] Trying ${modelName} (timeout: ${timeoutMs / 1000}s)`);
 
             const model = genAI.getGenerativeModel({
                 model: modelName,
                 safetySettings: SAFETY_SETTINGS,
                 generationConfig: {
-                    temperature: params.temperature ?? 0.2,
-                    maxOutputTokens: params.max_tokens ?? 1500,
+                    temperature,
+                    maxOutputTokens: maxTokens,
+                    // Force JSON output format for deep mode to avoid markdown wrapping
+                    ...(mode === "deep" ? { responseMimeType: "application/json" } : {}),
                 },
             });
 
-            const result = await model.generateContent(prompt);
+            // Race the model call against the per-model abort controller
+            const result = await Promise.race([
+                model.generateContent(prompt),
+                new Promise<never>((_, reject) =>
+                    controller.signal.addEventListener("abort", () =>
+                        reject(new Error(`[gemini] ${modelName} timed out after ${timeoutMs / 1000}s`))
+                    )
+                ),
+            ]);
+
+            clearTimeout(timer);
 
             const text = result?.response?.text?.();
 
@@ -129,21 +162,25 @@ export async function callWithFallback(
                 continue;
             }
 
-            console.log(`[gemini] ✓ Success on ${modelName}`);
+            console.log(`[gemini] ✓ Success on ${modelName} (${text.length} chars)`);
             return text;
 
         } catch (err: any) {
+            clearTimeout(timer);
+
+            // Timeout — try the next (faster) model
+            if (err?.message?.includes("timed out")) {
+                console.warn(`[gemini] ${modelName} timed out — trying next model`);
+                continue;
+            }
+
             if (isModelUnavailable(err)) {
-                console.warn(
-                    `[gemini] ${modelName} unavailable — skipping`
-                );
+                console.warn(`[gemini] ${modelName} unavailable — skipping`);
                 continue;
             }
 
             if (isRateLimit(err)) {
-                console.warn(
-                    `[gemini] ${modelName} rate-limited — trying next model`
-                );
+                console.warn(`[gemini] ${modelName} rate-limited — trying next model`);
                 continue;
             }
 
@@ -155,7 +192,5 @@ export async function callWithFallback(
         }
     }
 
-    throw new Error(
-        "All Gemini models unavailable or rate-limited."
-    );
+    throw new Error("All Gemini models unavailable or rate-limited.");
 }

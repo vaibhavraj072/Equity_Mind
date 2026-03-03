@@ -6,6 +6,12 @@ import { saveAnalysis } from "@/lib/memory/history";
 import { runQuickMode } from "@/lib/agents/quick-mode";
 import { runDeepMode } from "@/lib/agents/deep-mode";
 
+/**
+ * Allow up to 180 seconds for deep mode analysis on Vercel / serverless.
+ * This matches the problem-statement requirement: max 3 minutes for Deep Mode.
+ */
+export const maxDuration = 180;
+
 export async function POST(req: NextRequest) {
     try {
         const body: AnalyzeRequest = await req.json();
@@ -32,7 +38,7 @@ export async function POST(req: NextRequest) {
         if (mode === "quick") {
             memo = await runQuickMode(upperTicker, userQuery, metrics, updatedProfile, dataSource);
         } else {
-            // Deep mode: load peer metrics
+            // Deep mode: load peer metrics in parallel
             const peersToLoad = peerTickers.length > 0 ? peerTickers : defaultPeers.slice(0, 3);
             const peerMetricsResults = await Promise.all(
                 peersToLoad.map(async (pt: string) => {
@@ -44,10 +50,27 @@ export async function POST(req: NextRequest) {
                     }
                 })
             );
-            memo = await runDeepMode(
-                upperTicker, userQuery, metrics, peerMetricsResults,
-                updatedProfile, dataSource, context
+
+            /**
+             * Race the deep-mode call against a 175 s hard ceiling.
+             * This ensures the route always resolves before Next.js / Vercel
+             * cuts the connection at 180 s (maxDuration above).
+             */
+            const DEEP_ROUTE_TIMEOUT_MS = 175_000;
+            const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(
+                    () => reject(new Error("Deep mode timed out after 175 s")),
+                    DEEP_ROUTE_TIMEOUT_MS
+                )
             );
+
+            memo = await Promise.race([
+                runDeepMode(
+                    upperTicker, userQuery, metrics, peerMetricsResults,
+                    updatedProfile, dataSource, context
+                ),
+                timeoutPromise,
+            ]);
         }
 
         // Save to history
