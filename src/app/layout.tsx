@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import TickerTape from "@/components/TickerTape";
 
 const inter = Inter({
     subsets: ["latin"],
@@ -24,8 +25,20 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
     return (
         <html lang="en" className={`dark ${inter.variable} ${jetbrainsMono.variable}`}>
-            <body className="min-h-screen antialiased" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
-                {children}
+            <body
+                className="min-h-screen antialiased"
+                style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
+            >
+                {/* ── NSE Live Ticker Tape ── */}
+                <TickerTape />
+
+                {/*
+                    Push all page content down by the ticker height (34px)
+                    so nothing is hidden behind the fixed bar.
+                */}
+                <div style={{ paddingTop: "34px" }}>
+                    {children}
+                </div>
             </body>
         </html>
     );

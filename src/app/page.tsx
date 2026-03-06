@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { ResearchMode } from "@/types";
 import {
@@ -8,22 +8,6 @@ import {
     BarChart2, Clock, Shield, ChevronRight, Activity
 } from "lucide-react";
 
-interface TickerItem {
-    symbol: string;
-    name: string;
-    price: string;
-    change: string;
-    changePercent: string;
-    up: boolean;
-    region: string;
-}
-
-// Placeholder shown while first fetch is in-flight
-const LOADING_TICKERS: TickerItem[] = Array.from({ length: 12 }, () => ({
-    symbol: "------", name: "------",
-    price: "---", change: "---", changePercent: "---",
-    up: true, region: "IN",
-}));
 
 // ── Candlestick data — deterministic (no Math.random = no hydration mismatch) ──
 const CANDLES = Array.from({ length: 40 }, (_, i) => ({
@@ -71,30 +55,12 @@ export default function HomePage() {
     const [mode, setMode] = useState<ResearchMode>("quick");
     const [ticker, setTicker] = useState("");
     const [query, setQuery] = useState("");
-    const [tickers, setTickers] = useState<TickerItem[]>(LOADING_TICKERS);
-    const [tickerSrc, setTickerSrc] = useState<"live" | "fallback" | "loading">("loading");
     const [loading, setLoading] = useState(false);
     const [history, setHistory] = useState<Array<{ ticker: string; query: string; mode: string; date: string }>>([]);
     const [timeStr, setTimeStr] = useState("");  // client-only
     const [marketOpen, setMarketOpen] = useState(false); // IST market hours
     const tickerRef = useRef<HTMLInputElement>(null);
 
-    // ── Fetch live market data from /api/ticker-data ──
-    const fetchTickers = useCallback(async () => {
-        try {
-            const res = await fetch("/api/ticker-data");
-            if (!res.ok) return;
-            const data = await res.json();
-            setTickers(data.tickers ?? []);
-            setTickerSrc(data.source ?? "live");
-        } catch { /* retain previous data on network error */ }
-    }, []);
-
-    useEffect(() => {
-        fetchTickers(); // initial load
-        const id = setInterval(fetchTickers, 30_000); // refresh every 30s
-        return () => clearInterval(id);
-    }, [fetchTickers]);
 
     const cfg = MODES[mode];
 
@@ -178,79 +144,6 @@ export default function HomePage() {
             {/* ── App shell ── */}
             <div className="app-shell">
 
-                {/* ── Ticker tape ── */}
-                <div style={{
-                    background: "rgba(0,0,0,0.75)",
-                    borderBottom: "1px solid var(--border)",
-                    padding: "7px 0",
-                    overflow: "hidden",
-                    backdropFilter: "blur(8px)",
-                    position: "relative",
-                }}>
-                    {/* Live badge */}
-                    <div style={{
-                        position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
-                        zIndex: 2, display: "flex", alignItems: "center", gap: 5,
-                        background: "rgba(0,0,0,0.8)", padding: "3px 8px", borderRadius: 4,
-                        border: "1px solid var(--border)",
-                    }}>
-                        {tickerSrc === "live" ? (
-                            <><span className="live-dot" style={{ width: 6, height: 6 }} />
-                                <span style={{ fontSize: "0.6rem", fontWeight: 700, color: "var(--bull)", letterSpacing: "0.08em" }}>LIVE</span></>
-                        ) : tickerSrc === "loading" ? (
-                            <span style={{ fontSize: "0.6rem", color: "var(--text-3)", letterSpacing: "0.05em" }}>LOADING…</span>
-                        ) : (
-                            <span style={{ fontSize: "0.6rem", color: "var(--text-3)", letterSpacing: "0.05em" }}>SNAPSHOT</span>
-                        )}
-                    </div>
-                    {/* Fade edges */}
-                    <div style={{
-                        position: "absolute", left: 0, top: 0, bottom: 0, width: 60,
-                        background: "linear-gradient(to right, rgba(0,0,0,0.8), transparent)", zIndex: 1, pointerEvents: "none"
-                    }} />
-                    <div style={{
-                        position: "absolute", right: 0, top: 0, bottom: 0, width: 120,
-                        background: "linear-gradient(to left, rgba(0,0,0,0.8), transparent)", zIndex: 1, pointerEvents: "none"
-                    }} />
-
-                    <div style={{ display: "flex", overflow: "hidden" }}>
-                        <div className="ticker-tape">
-                            {/* Duplicate for seamless loop */}
-                            {[...tickers, ...tickers].map((t, i) => (
-                                <span key={i} style={{
-                                    display: "inline-flex", alignItems: "center",
-                                    gap: 6, padding: "0 20px", fontSize: "0.78rem",
-                                    whiteSpace: "nowrap",
-                                }}>
-                                    {/* Region badge */}
-                                    {t.region === "IN" && (
-                                        <span style={{
-                                            fontSize: "0.55rem", padding: "1px 4px", borderRadius: 3,
-                                            background: "rgba(255,153,51,0.15)", color: "#ff9933",
-                                            fontWeight: 700, letterSpacing: "0.05em", border: "1px solid rgba(255,153,51,0.2)"
-                                        }}>IN</span>
-                                    )}
-                                    {t.region === "FX" && (
-                                        <span style={{
-                                            fontSize: "0.55rem", padding: "1px 4px", borderRadius: 3,
-                                            background: "rgba(99,120,180,0.15)", color: "var(--text-2)",
-                                            fontWeight: 700, letterSpacing: "0.05em", border: "1px solid var(--border)"
-                                        }}>FX</span>
-                                    )}
-                                    <span style={{
-                                        fontWeight: 700, fontFamily: "var(--font-mono, monospace)",
-                                        color: "var(--text-1)", letterSpacing: "0.05em"
-                                    }}>{t.name}</span>
-                                    <span style={{ color: "var(--text-3)", fontFamily: "var(--font-mono, monospace)" }}>{t.price}</span>
-                                    <span style={{ color: t.up ? "var(--bull)" : "var(--bear)", fontWeight: 600, fontFamily: "var(--font-mono, monospace)" }}>
-                                        {t.up ? "▲" : "▼"} {t.changePercent}
-                                    </span>
-                                    <span style={{ color: "var(--border-hi)", fontSize: "0.55rem" }}>│</span>
-                                </span>
-                            ))}
-                        </div>
-                    </div>
-                </div>
 
                 {/* ── Navbar ── */}
                 <nav style={{

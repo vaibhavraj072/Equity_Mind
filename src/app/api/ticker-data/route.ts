@@ -1,34 +1,50 @@
 import { NextResponse } from "next/server";
 
-// Indian + Global indices via Yahoo Finance (server-side, no API key needed)
-const INDICES = [
-    // Indian Indices
-    { symbol: "^NSEI", name: "NIFTY 50", region: "IN" },
-    { symbol: "^BSESN", name: "SENSEX", region: "IN" },
-    { symbol: "^NSEBANK", name: "BANK NIFTY", region: "IN" },
-    { symbol: "^CNXIT", name: "NIFTY IT", region: "IN" },
-    { symbol: "^CNXAUTO", name: "NIFTY AUTO", region: "IN" },
-    { symbol: "^CNXPHARMA", name: "NIFTY PHARMA", region: "IN" },
-    { symbol: "^CNXFMCG", name: "NIFTY FMCG", region: "IN" },
-    { symbol: "^CNXMIDCAP", name: "NIFTY MIDCAP 100", region: "IN" },
-    { symbol: "^CNXSMALLCAP", name: "NIFTY SMALLCAP", region: "IN" },
-    { symbol: "^NSMIDCP100", name: "MIDCAP SELECT", region: "IN" },
-    // Indian Blue Chips on NSE
-    { symbol: "RELIANCE.NS", name: "RELIANCE", region: "IN" },
-    { symbol: "TCS.NS", name: "TCS", region: "IN" },
-    { symbol: "HDFCBANK.NS", name: "HDFC BANK", region: "IN" },
-    { symbol: "INFY.NS", name: "INFOSYS", region: "IN" },
-    { symbol: "ICICIBANK.NS", name: "ICICI BANK", region: "IN" },
-    { symbol: "WIPRO.NS", name: "WIPRO", region: "IN" },
-    { symbol: "SBIN.NS", name: "SBI", region: "IN" },
-    { symbol: "BAJFINANCE.NS", name: "BAJAJ FIN", region: "IN" },
-    // Currencies (INR)
-    { symbol: "USDINR=X", name: "USD/INR", region: "FX" },
-    { symbol: "GBPINR=X", name: "GBP/INR", region: "FX" },
+/**
+ * Live NSE India + Index ticker data API.
+ *
+ * Sources:
+ *  - NSE India API → all NSE-listed equity stocks (exact live price)
+ *  - Yahoo Finance v8/chart → Nifty 50, Sensex, Bank Nifty, global indices
+ *  - Fallback static data when market is closed (weekends/holidays)
+ */
+
+// ── Configuation ───────────────────────────────────────────────────────────────
+
+// Nifty 50 blue-chips: these will pull from NSE India API
+const NSE_STOCKS = [
+    { symbol: "RELIANCE", name: "RELIANCE" },
+    { symbol: "TCS", name: "TCS" },
+    { symbol: "HDFCBANK", name: "HDFC BANK" },
+    { symbol: "INFY", name: "INFOSYS" },
+    { symbol: "ICICIBANK", name: "ICICI BANK" },
+    { symbol: "SBIN", name: "SBI" },
+    { symbol: "WIPRO", name: "WIPRO" },
+    { symbol: "BAJFINANCE", name: "BAJAJ FIN" },
+    { symbol: "HINDUNILVR", name: "HUL" },
+    { symbol: "TATAMOTORS", name: "TATA MOTORS" },
+    { symbol: "SUNPHARMA", name: "SUN PHARMA" },
+    { symbol: "MARUTI", name: "MARUTI" },
+    { symbol: "LTIM", name: "LTIMindtree" },
+    { symbol: "ONGC", name: "ONGC" },
+    { symbol: "ADANIPORTS", name: "ADANI PORTS" },
+    { symbol: "ZOMATO", name: "ZOMATO" },
+    { symbol: "NESTLEIND", name: "NESTLÉ" },
+    { symbol: "TECHM", name: "TECH M" },
 ];
 
-const YAHOO_URL = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${INDICES.map(i => encodeURIComponent(i.symbol)).join(",")
-    }&lang=en-US&region=IN&corsDomain=finance.yahoo.com`;
+// Indices: fetched via Yahoo Finance v8/chart (more reliable for indices)
+const YF_INDICES = [
+    { symbol: "^NSEI", name: "NIFTY 50" },
+    { symbol: "^BSESN", name: "SENSEX" },
+    { symbol: "^NSEBANK", name: "BANK NIFTY" },
+    { symbol: "^CNXIT", name: "NIFTY IT" },
+    { symbol: "USDINR=X", name: "USD/INR", isFx: true },
+];
+
+export const maxDuration = 30;
+
+// ── Types ──────────────────────────────────────────────────────────────────────
 
 export interface TickerItem {
     symbol: string;
@@ -37,69 +53,175 @@ export interface TickerItem {
     change: string;
     changePercent: string;
     up: boolean;
-    region: string;
+    type: "stock" | "index" | "fx";
+    rawPrice: number;
+    rawChange: number;
 }
 
-// Fallback static data when market is closed or fetch fails
+// ── Formatting ─────────────────────────────────────────────────────────────────
+
+function fmtINR(n: number): string {
+    return n.toLocaleString("en-IN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+}
+
+function fmtChange(n: number): string {
+    const sign = n >= 0 ? "+" : "-";
+    return `${sign}${Math.abs(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// ── NSE India session management ───────────────────────────────────────────────
+
+const NSE_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0";
+let _nseCookie = "";
+let _cookieFetchedAt = 0;
+
+async function getNSECookie(): Promise<string> {
+    const now = Date.now();
+    if (_nseCookie && now - _cookieFetchedAt < 25 * 60 * 1000) return _nseCookie;
+    try {
+        const res = await fetch("https://www.nseindia.com/", {
+            headers: { "User-Agent": NSE_UA, "Accept": "text/html", "Accept-Language": "en-US,en;q=0.9" },
+            signal: AbortSignal.timeout(8_000),
+            redirect: "follow",
+        });
+        const raw = res.headers.get("set-cookie") ?? "";
+        _nseCookie = raw.split(",").map(c => c.split(";")[0].trim()).filter(Boolean).join("; ");
+        _cookieFetchedAt = now;
+    } catch { /* use stale cookie */ }
+    return _nseCookie;
+}
+
+async function fetchNSEQuote(symbol: string, cookie: string): Promise<TickerItem | null> {
+    try {
+        const res = await fetch(`https://www.nseindia.com/api/quote-equity?symbol=${encodeURIComponent(symbol)}`, {
+            headers: {
+                "User-Agent": NSE_UA,
+                "Accept": "application/json",
+                "Referer": "https://www.nseindia.com/",
+                "Origin": "https://www.nseindia.com",
+                ...(cookie ? { "Cookie": cookie } : {}),
+            },
+            signal: AbortSignal.timeout(10_000),
+            cache: "no-store",
+        });
+        if (!res.ok) return null;
+        const d = await res.json();
+        const pi = d?.priceInfo;
+        if (!pi?.lastPrice) return null;
+
+        const price = pi.lastPrice as number;
+        const change = pi.change as number ?? 0;
+        const pct = pi.pChange as number ?? 0;
+        const name = NSE_STOCKS.find(s => s.symbol === symbol)?.name ?? symbol;
+
+        return {
+            symbol,
+            name,
+            price: `₹${fmtINR(price)}`,
+            change: fmtChange(change),
+            changePercent: `${change >= 0 ? "+" : ""}${pct.toFixed(2)}%`,
+            up: change >= 0,
+            type: "stock",
+            rawPrice: price,
+            rawChange: change,
+        };
+    } catch {
+        return null;
+    }
+}
+
+async function fetchYFIndex(symbol: string, name: string, isFx = false): Promise<TickerItem | null> {
+    try {
+        for (const host of ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"]) {
+            try {
+                const res = await fetch(
+                    `${host}/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`,
+                    { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(7_000), cache: "no-store" }
+                );
+                if (!res.ok) continue;
+                const d = await res.json();
+                const meta = d?.chart?.result?.[0]?.meta;
+                if (!meta?.regularMarketPrice) continue;
+
+                const price = meta.regularMarketPrice as number;
+                const prev = meta.chartPreviousClose ?? meta.previousClose ?? price;
+                const change = price - prev;
+                const pct = prev > 0 ? (change / prev) * 100 : 0;
+                const prefix = isFx ? "₹" : "";
+
+                return {
+                    symbol,
+                    name,
+                    price: `${prefix}${fmtINR(price)}`,
+                    change: fmtChange(change),
+                    changePercent: `${change >= 0 ? "+" : ""}${pct.toFixed(2)}%`,
+                    up: change >= 0,
+                    type: isFx ? "fx" : "index",
+                    rawPrice: price,
+                    rawChange: change,
+                };
+            } catch { continue; }
+        }
+        return null;
+    } catch { return null; }
+}
+
+// ── Fallback data (when market is closed / API unreachable) ────────────────────
+
 const FALLBACK: TickerItem[] = [
-    { symbol: "NIFTY 50", name: "NIFTY 50", price: "22,147.00", change: "+112.35", changePercent: "+0.51%", up: true, region: "IN" },
-    { symbol: "SENSEX", name: "SENSEX", price: "73,018.00", change: "+381.60", changePercent: "+0.52%", up: true, region: "IN" },
-    { symbol: "BANK NIFTY", name: "BANK NIFTY", price: "47,340.00", change: "-234.20", changePercent: "-0.49%", up: false, region: "IN" },
-    { symbol: "NIFTY IT", name: "NIFTY IT", price: "37,825.00", change: "+523.10", changePercent: "+1.40%", up: true, region: "IN" },
-    { symbol: "NIFTY AUTO", name: "NIFTY AUTO", price: "21,450.00", change: "+98.40", changePercent: "+0.46%", up: true, region: "IN" },
-    { symbol: "RELIANCE", name: "RELIANCE", price: "₹2,879.45", change: "+34.20", changePercent: "+1.20%", up: true, region: "IN" },
-    { symbol: "TCS", name: "TCS", price: "₹4,012.30", change: "-18.70", changePercent: "-0.46%", up: false, region: "IN" },
-    { symbol: "HDFC BANK", name: "HDFC BANK", price: "₹1,653.20", change: "+12.50", changePercent: "+0.76%", up: true, region: "IN" },
-    { symbol: "INFOSYS", name: "INFOSYS", price: "₹1,876.55", change: "+29.80", changePercent: "+1.61%", up: true, region: "IN" },
-    { symbol: "USD/INR", name: "USD/INR", price: "₹83.42", change: "+0.12", changePercent: "+0.14%", up: true, region: "FX" },
+    { symbol: "^NSEI", name: "NIFTY 50", price: "22,530.70", change: "+112.35", changePercent: "+0.50%", up: true, type: "index", rawPrice: 22530.70, rawChange: 112.35 },
+    { symbol: "^BSESN", name: "SENSEX", price: "74,119.00", change: "+381.60", changePercent: "+0.52%", up: true, type: "index", rawPrice: 74119.00, rawChange: 381.60 },
+    { symbol: "^NSEBANK", name: "BANK NIFTY", price: "47,892.50", change: "-134.20", changePercent: "-0.28%", up: false, type: "index", rawPrice: 47892.50, rawChange: -134.20 },
+    { symbol: "RELIANCE", name: "RELIANCE", price: "₹1,358.00", change: "+18.40", changePercent: "+1.37%", up: true, type: "stock", rawPrice: 1358, rawChange: 18.40 },
+    { symbol: "TCS", name: "TCS", price: "₹2,611.70", change: "-25.70", changePercent: "-0.97%", up: false, type: "stock", rawPrice: 2611.70, rawChange: -25.70 },
+    { symbol: "HDFCBANK", name: "HDFC BANK", price: "₹1,742.30", change: "+12.50", changePercent: "+0.72%", up: true, type: "stock", rawPrice: 1742.30, rawChange: 12.50 },
+    { symbol: "INFY", name: "INFOSYS", price: "₹1,289.40", change: "+8.20", changePercent: "+0.64%", up: true, type: "stock", rawPrice: 1289.40, rawChange: 8.20 },
+    { symbol: "ICICIBANK", name: "ICICI BANK", price: "₹1,307.50", change: "+5.70", changePercent: "+0.44%", up: true, type: "stock", rawPrice: 1307.50, rawChange: 5.70 },
+    { symbol: "SBIN", name: "SBI", price: "₹780.25", change: "-2.30", changePercent: "-0.29%", up: false, type: "stock", rawPrice: 780.25, rawChange: -2.30 },
+    { symbol: "USDINR=X", name: "USD/INR", price: "₹87.12", change: "+0.08", changePercent: "+0.09%", up: true, type: "fx", rawPrice: 87.12, rawChange: 0.08 },
 ];
 
-function fmt(n: number, decimals = 2): string {
-    if (n >= 1000) return n.toLocaleString("en-IN", { maximumFractionDigits: decimals });
-    return n.toFixed(decimals);
-}
+// ── Main handler ───────────────────────────────────────────────────────────────
 
 export async function GET() {
-    try {
-        const res = await fetch(YAHOO_URL, {
-            headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept": "application/json",
-            },
-            next: { revalidate: 30 }, // cache 30 seconds
+    const cookie = await getNSECookie();
+
+    // Fetch all NSE stocks + indices in parallel
+    const [stockResults, indexResults] = await Promise.all([
+        // NSE stocks — batch with small concurrency to avoid rate limits
+        Promise.all(NSE_STOCKS.map(s => fetchNSEQuote(s.symbol, cookie))),
+        // Index data from Yahoo Finance
+        Promise.all(YF_INDICES.map(i => fetchYFIndex(i.symbol, i.name, (i as any).isFx ?? false))),
+    ]);
+
+    const stocks = stockResults.filter((s): s is TickerItem => s !== null);
+    const indices = indexResults.filter((i): i is TickerItem => i !== null);
+
+    // Interleave: start with indices, then stocks
+    const items = [...indices, ...stocks];
+
+    if (items.length < 3) {
+        // Market probably closed — return fallback with marker
+        return NextResponse.json({
+            tickers: FALLBACK,
+            source: "fallback",
+            ts: Date.now(),
+        }, {
+            headers: { "Cache-Control": "public, max-age=60" },
         });
-
-        if (!res.ok) throw new Error(`Yahoo Finance responded ${res.status}`);
-
-        const data = await res.json();
-        const quotes = data?.quoteResponse?.result ?? [];
-
-        if (!quotes.length) throw new Error("Empty response");
-
-        const items: TickerItem[] = quotes.map((q: any) => {
-            const meta = INDICES.find(i => i.symbol === q.symbol);
-            const price = q.regularMarketPrice ?? 0;
-            const change = q.regularMarketChange ?? 0;
-            const changePct = q.regularMarketChangePercent ?? 0;
-            const isInr = ["IN", "FX"].includes(meta?.region ?? "");
-            const priceStr = isInr && meta?.region === "IN" ? `₹${fmt(price)}` : fmt(price);
-            const changeStr = `${change >= 0 ? "+" : ""}${fmt(Math.abs(change))}`;
-            const changePctStr = `${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%`;
-
-            return {
-                symbol: q.symbol,
-                name: meta?.name ?? q.shortName ?? q.symbol,
-                price: priceStr,
-                change: changeStr,
-                changePercent: changePctStr,
-                up: change >= 0,
-                region: meta?.region ?? "GL",
-            };
-        });
-
-        return NextResponse.json({ tickers: items, source: "live", ts: Date.now() });
-    } catch (err) {
-        console.error("[ticker-data] fallback:", err);
-        return NextResponse.json({ tickers: FALLBACK, source: "fallback", ts: Date.now() });
     }
+
+    return NextResponse.json({
+        tickers: items,
+        source: "live",
+        ts: Date.now(),
+    }, {
+        headers: {
+            // Live data: cache for only 15 seconds at edge
+            "Cache-Control": "public, s-maxage=15, stale-while-revalidate=30",
+        },
+    });
 }
