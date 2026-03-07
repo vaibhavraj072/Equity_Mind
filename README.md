@@ -3,14 +3,13 @@
 
 <p align="center">
   <a href="https://youtu.be/Fx1xn6MFRTk">
-    <img src="https://img.youtube.com/vi/Fx1xn6MFRTk/maxresdefault.jpg" alt="EquityMind AI Demo" width="900"/>
+    <img src="https://img.youtube.com/vi/Fx1xn6MFRTk/0.jpg" alt="EquityMind AI Demo" width="900">
   </a>
 </p>
 
 <p align="center">
   ▶ Click the banner above to watch the full demo
 </p>
-
 ---
 
 ## 🌟 Overview
