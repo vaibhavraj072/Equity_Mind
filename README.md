@@ -1,13 +1,23 @@
 # EquityMind AI  
 ### Explain. Compare. Justify
+# EquityMind AI  
+### Explain. Compare. Justify
+
+<p align="center">
+  <a href="https://youtu.be/Fx1xn6MFRTk">
+    <img src="https://img.youtube.com/vi/Fx1xn6MFRTk/maxresdefault.jpg" width="900">
+  </a>
+</p>
+
+<p align="center">
+  ▶ Click the banner above to watch the demo
+</p>
 
 ---
 
 ## 🎥 Project Demo
 
 [![Watch the Demo](https://img.youtube.com/vi/Fx1xn6MFRTk/maxresdefault.jpg)](https://youtu.be/Fx1xn6MFRTk)
-
-▶ Click the image above to watch the full demo on YouTube.
 
 ▶ Click the image above to watch the full demo on YouTube.
 
