@@ -5,7 +5,7 @@
 
 ## 🎥 Project Demo
 
-[![Watch the Demo](https://img.youtube.com/vi/oUOFlz9ysYQ/maxresdefault.jpg)](https://youtu.be/oUOFlz9ysYQ)
+[![Watch the Demo](https://youtu.be/Fx1xn6MFRTk)
 
 ▶ Click the image above to watch the full demo on YouTube.
 
